@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>オセロ</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    background: #f3eefb; color: #3b2f5c; font-family: "Hiragino Sans", "Meiryo", sans-serif;
+    padding: 12px;
+  }
+  h1 { margin: 8px 0; font-size: 1.6rem; }
+  .panel { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .score {
+    display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px;
+    background: #fff; border: 3px solid transparent; font-weight: bold; font-size: 1.2rem;
+  }
+  .score.active { border-color: #e0457b; box-shadow: 0 0 10px rgba(224,69,123,.5); }
+  .score img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid #999; }
+  #msg { min-height: 1.6em; font-weight: bold; text-align: center; margin-bottom: 8px; }
+  #board {
+    --size: min(92vw, 520px);
+    width: var(--size); height: var(--size);
+    display: grid; grid-template: repeat(8, 1fr) / repeat(8, 1fr);
+    background: #2e8b57; padding: 6px; border-radius: 10px; gap: 2px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.3);
+  }
+  .cell {
+    background: #3aa16a; position: relative; display: flex; align-items: center; justify-content: center;
+    cursor: default; border-radius: 3px;
+  }
+  .cell.hint { cursor: pointer; }
+  .cell.hint::after {
+    content: ""; width: 26%; height: 26%; border-radius: 50%; background: rgba(255,255,255,.55);
+  }
+  .cell.hint:hover { background: #48b87a; }
+  .cell.last { outline: 3px solid #ffd54a; outline-offset: -3px; }
+  .piece {
+    width: 88%; height: 88%; border-radius: 50%; object-fit: cover;
+    box-shadow: 0 2px 5px rgba(0,0,0,.45); background: #fff;
+  }
+  .piece.black { border: 3px solid #222; }
+  .piece.white { border: 3px solid #e8e8f5; }
+  .piece.flip { animation: flip .45s ease; }
+  @keyframes flip { 0% { transform: rotateY(90deg) scale(.8); } 100% { transform: rotateY(0) scale(1); } }
+  .controls { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  button, select {
+    font-size: 1rem; padding: 8px 16px; border-radius: 8px; border: 2px solid #7a5cc4;
+    background: #fff; color: #3b2f5c; cursor: pointer;
+  }
+  button:hover { background: #ece4ff; }
+</style>
+</head>
+<body>
+  <h1>オセロ</h1>
+  <div class="panel">
+    <div class="score" id="sb"><img src="images/black.jpg" alt="黒"><span id="cb">2</span></div>
+    <div class="score" id="sw"><img src="images/white.jpg" alt="白"><span id="cw">2</span></div>
+  </div>
+  <div id="msg"></div>
+  <div id="board"></div>
+  <div class="controls">
+    <label>対戦相手:
+      <select id="mode">
+        <option value="cpu">コンピュータ (あなたが黒・先手)</option>
+        <option value="two">2人で対戦</option>
+      </select>
+    </label>
+    <button id="reset">はじめから</button>
+  </div>
+
+<script>
+const N = 8, EMPTY = 0, BLACK = 1, WHITE = 2;
+const DIRS = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+const NAME = { [BLACK]: "黒", [WHITE]: "白" };
+const IMG = { [BLACK]: "images/black.jpg", [WHITE]: "images/white.jpg" };
+
+let board, turn, last, over, busy;
+const boardEl = document.getElementById("board");
+const msgEl = document.getElementById("msg");
+const modeEl = document.getElementById("mode");
+
+const opp = p => 3 - p;
+const inB = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
+
+function flipsFor(b, r, c, p) {
+  if (b[r][c] !== EMPTY) return [];
+  const out = [];
+  for (const [dr, dc] of DIRS) {
+    const line = [];
+    let y = r + dr, x = c + dc;
+    while (inB(y, x) && b[y][x] === opp(p)) { line.push([y, x]); y += dr; x += dc; }
+    if (line.length && inB(y, x) && b[y][x] === p) out.push(...line);
+  }
+  return out;
+}
+function validMoves(b, p) {
+  const m = [];
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const f = flipsFor(b, r, c, p);
+    if (f.length) m.push({ r, c, f });
+  }
+  return m;
+}
+function count(b) {
+  let k = { [BLACK]: 0, [WHITE]: 0 };
+  for (const row of b) for (const v of row) if (v) k[v]++;
+  return k;
+}
+
+function init() {
+  board = Array.from({ length: N }, () => Array(N).fill(EMPTY));
+  board[3][3] = WHITE; board[4][4] = WHITE; board[3][4] = BLACK; board[4][3] = BLACK;
+  turn = BLACK; last = null; over = false; busy = false;
+  render([]);
+  updateTurn();
+}
+
+function render(flipped) {
+  const moves = (!over && !busy && isHumanTurn()) ? validMoves(board, turn) : [];
+  boardEl.innerHTML = "";
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const d = document.createElement("div");
+    d.className = "cell";
+    if (last && last[0] === r && last[1] === c) d.classList.add("last");
+    const v = board[r][c];
+    if (v) {
+      const img = document.createElement("img");
+      img.src = IMG[v]; img.alt = NAME[v];
+      img.className = "piece " + (v === BLACK ? "black" : "white");
+      if (flipped.some(([y, x]) => y === r && x === c)) img.classList.add("flip");
+      d.appendChild(img);
+    } else if (moves.some(m => m.r === r && m.c === c)) {
+      d.classList.add("hint");
+      d.addEventListener("click", () => play(r, c));
+    }
+    boardEl.appendChild(d);
+  }
+  const k = count(board);
+  document.getElementById("cb").textContent = k[BLACK];
+  document.getElementById("cw").textContent = k[WHITE];
+  document.getElementById("sb").classList.toggle("active", !over && turn === BLACK);
+  document.getElementById("sw").classList.toggle("active", !over && turn === WHITE);
+}
+
+const isHumanTurn = () => modeEl.value === "two" || turn === BLACK;
+
+function updateTurn() {
+  if (over) return;
+  msgEl.textContent = modeEl.value === "cpu" && turn === WHITE
+    ? "白(コンピュータ)が考え中…" : `${NAME[turn]}の番です`;
+}
+
+function play(r, c) {
+  const f = flipsFor(board, r, c, turn);
+  if (!f.length || over) return;
+  board[r][c] = turn;
+  for (const [y, x] of f) board[y][x] = turn;
+  last = [r, c];
+  turn = opp(turn);
+  afterMove(f);
+}
+
+function afterMove(flipped) {
+  let notice = "";
+  if (!validMoves(board, turn).length) {
+    const passed = turn;
+    turn = opp(turn);
+    if (!validMoves(board, turn).length) return finish(flipped);
+    notice = `${NAME[passed]}は置ける場所がないのでパスです。 `;
+  }
+  busy = !isHumanTurn();
+  render(flipped);
+  updateTurn();
+  if (notice) msgEl.textContent = notice + msgEl.textContent;
+  if (busy) setTimeout(cpuMove, 700);
+}
+
+function finish(flipped) {
+  over = true; busy = false;
+  render(flipped);
+  const k = count(board);
+  msgEl.textContent = k[BLACK] === k[WHITE] ? `引き分け! (${k[BLACK]} - ${k[WHITE]})`
+    : `${k[BLACK] > k[WHITE] ? "黒" : "白"}の勝ち! (黒 ${k[BLACK]} - 白 ${k[WHITE]})`;
+}
+
+// CPU: 角を優先、角の隣(X/Cマス)を避け、基本は重み付き評価
+const W = [
+  [100,-20, 10,  5,  5, 10,-20,100],
+  [-20,-50, -2, -2, -2, -2,-50,-20],
+  [ 10, -2,  5,  1,  1,  5, -2, 10],
+  [  5, -2,  1,  0,  0,  1, -2,  5],
+  [  5, -2,  1,  0,  0,  1, -2,  5],
+  [ 10, -2,  5,  1,  1,  5, -2, 10],
+  [-20,-50, -2, -2, -2, -2,-50,-20],
+  [100,-20, 10,  5,  5, 10,-20,100],
+];
+function cpuMove() {
+  if (over) return;
+  const moves = validMoves(board, turn);
+  if (!moves.length) return;
+  let best = null, bs = -Infinity;
+  for (const m of moves) {
+    const s = W[m.r][m.c] * 3 + m.f.length + Math.random();
+    if (s > bs) { bs = s; best = m; }
+  }
+  busy = false;
+  play(best.r, best.c);
+}
+
+document.getElementById("reset").addEventListener("click", init);
+modeEl.addEventListener("change", init);
+init();
+</script>
+</body>
+</html>

@@ -64,8 +64,14 @@
   <div class="controls">
     <label>対戦相手:
       <select id="mode">
-        <option value="cpu">コンピュータ (あなたが黒・先手)</option>
+        <option value="cpu">コンピュータ</option>
         <option value="two">2人で対戦</option>
+      </select>
+    </label>
+    <label>あなたの色:
+      <select id="side">
+        <option value="1">黒 (先手)</option>
+        <option value="2">白 (後手)</option>
       </select>
     </label>
     <button id="reset">はじめから</button>
@@ -81,6 +87,7 @@ let board, turn, last, over, busy;
 const boardEl = document.getElementById("board");
 const msgEl = document.getElementById("msg");
 const modeEl = document.getElementById("mode");
+const sideEl = document.getElementById("side");
 
 const opp = p => 3 - p;
 const inB = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
@@ -113,9 +120,12 @@ function count(b) {
 function init() {
   board = Array.from({ length: N }, () => Array(N).fill(EMPTY));
   board[3][3] = WHITE; board[4][4] = WHITE; board[3][4] = BLACK; board[4][3] = BLACK;
-  turn = BLACK; last = null; over = false; busy = false;
+  turn = BLACK; last = null; over = false;
+  sideEl.disabled = modeEl.value === "two";
+  busy = !isHumanTurn();
   render([]);
   updateTurn();
+  if (busy) setTimeout(cpuMove, 700);
 }
 
 function render(flipped) {
@@ -145,12 +155,12 @@ function render(flipped) {
   document.getElementById("sw").classList.toggle("active", !over && turn === WHITE);
 }
 
-const isHumanTurn = () => modeEl.value === "two" || turn === BLACK;
+const isHumanTurn = () => modeEl.value === "two" || turn === Number(sideEl.value);
 
 function updateTurn() {
   if (over) return;
-  msgEl.textContent = modeEl.value === "cpu" && turn === WHITE
-    ? "白(コンピュータ)が考え中…" : `${NAME[turn]}の番です`;
+  msgEl.textContent = isHumanTurn()
+    ? `${NAME[turn]}の番です` : `${NAME[turn]}(コンピュータ)が考え中…`;
 }
 
 function play(r, c) {
@@ -212,6 +222,7 @@ function cpuMove() {
 
 document.getElementById("reset").addEventListener("click", init);
 modeEl.addEventListener("change", init);
+sideEl.addEventListener("change", init);
 init();
 </script>
 </body>
